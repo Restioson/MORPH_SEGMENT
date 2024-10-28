@@ -9,7 +9,6 @@ from torchtext.data import Field, BucketIterator
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 
-import spacy
 import numpy as np
 
 import random
@@ -49,11 +48,12 @@ class data:
     '''
     def getIterators(self):
         fields = {'src': ('src', self.SRC), 'trg': ('trg', self.TRG)}
+        lang = "zulu"
         train_data, valid_data, test_data = torchtext.data.TabularDataset.splits(
-                                path = "../../Data/zulu/json",
-                                train = 'zulu-train.json',
-                                test = 'zulu-test.json',
-                                validation = 'zulu-validation.json',
+                                path = f"../../Data/{lang}/json",
+                                train = f'{lang}-train.json',
+                                test = f'{lang}-test.json',
+                                validation = f'{lang}-valid.json',
                                 format = 'json',
                                 fields = fields)
         self.SRC.build_vocab(train_data)
@@ -65,13 +65,13 @@ class data:
         batch_size=self.BATCH_SIZE,
         device=self.device)
 
-        print("Train Size: ", len(train_data))
-        print("Test Size: ", len(test_data))
-        print("Valid: ", len(valid_data))
-        print("Source Vocab: ", self.SRC.vocab.itos)
-        print("Target Vocab: ", self.TRG.vocab.itos)
+        # print("Train Size: ", len(train_data))
+        # print("Test Size: ", len(test_data))
+        # print("Valid: ", len(valid_data))
+        # print("Source Vocab: ", self.SRC.vocab.itos)
+        # print("Target Vocab: ", self.TRG.vocab.itos)
 
-        return train_iterator, valid_iterator, test_iterator, test_data, train_data, self.SRC, self.TRG
+        return train_iterator, valid_iterator, test_iterator, test_data, train_data, valid_data, self.SRC, self.TRG
     
 
 

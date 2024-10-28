@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import time
 import pickle
@@ -36,7 +37,7 @@ class BaselineCRF:
         dictionaries = (training_data, dev_data, test_data)
         counter = 0
         for file in self.input_files:
-            input_file = open(os.path.join(sys.path[0], file), 'r')
+            input_file = open(os.path.join("/home/restioson/PycharmProjects/MORPH_SEGMENT/Conditional Random Fields/Baseline CRF Model", file), 'r')
             for line in input_file.readlines():
                 content = line.rstrip('\n').split(" | ")
                 result = []
@@ -64,10 +65,14 @@ class BaselineCRF:
                             label += 'M'
                         label += 'E'
 
+                word = content[0]
+                word = re.sub(r"(?<=[a-zA-Z0-9'])-(?=[a-zA-Z0-9'])", '', word)
+                word = word[:-1] if len(word) > 1 and word[-1] == "-" else word
+
                 # current dictionary being referenced
                 # Key is word and value is segmented form
                 # print(content)
-                dictionaries[counter][content[0]] = label
+                dictionaries[counter][word] = label
 
             # input_file.close()
             counter += 1
@@ -157,7 +162,11 @@ class BaselineCRF:
                             label += 'M'
                         label += 'E'
 
-                dictionaries[counter][content[0]] = label
+                word = content[0]
+                word = re.sub(r"(?<=[a-zA-Z0-9'])-(?=[a-zA-Z0-9'])", '', word)
+                word = word[:-1] if len(word) > 1 and word[-1] == "-" else word
+
+                dictionaries[counter][word] = label
 
             counter += 1
 
@@ -370,8 +379,6 @@ class BaselineCRF:
         test_file = "../morphology/" + self.language + "/" + self.language + ".clean.test.conll"
         input_file = open(os.path.join(sys.path[0], test_file), 'r')
         segmented_words = []
-
-        # Only one entry per word for dictionary
 
         words = []
         labels = []
@@ -849,22 +856,34 @@ def x_run_average_surface(num: int, language: str):
     :param language: The language the model should operate on
     :return: The average precision, recall and f1 scores across all num runs
     """
-    recall, precision, f1 = [], [], []
+    recall, precision, f1, f1_macro = [], [], [], []
     for i in range(num):
         CRF = BaselineCRF(language)
         x, y = CRF.surface_segmentation()
 
-        test = MultiLabelBinarizer().fit_transform(y)
-        predicted = MultiLabelBinarizer().fit_transform(x)
+        test = [elt for seq in y for elt in seq]
+        predicted = [elt for seq in x for elt in seq]
+
+        # todo is onkly returning few
+        print(len(y))
+
+        # mlb_test = MultiLabelBinarizer()
+        # mlb_pred = MultiLabelBinarizer()
+        # test = mlb_test.fit_transform(y)
+        # predicted = mlb_pred.fit_transform(x)
+
+        # print("pred", test)
+        # print("correct", predicted)
 
         recall.append(recall_score(test, predicted, average='micro'))
         precision.append(precision_score(test, predicted, average='micro'))
         f1.append(f1_score(test, predicted, average='micro'))
+        f1_macro.append(f1_score(test, predicted, average='macro'))
 
     recall = sum(recall) / len(recall)
     precision = sum(precision) / len(precision)
     f1 = sum(f1) / len(f1)
-    return recall, precision, f1
+    return f"{f1:.4f}", f"{sum(f1_macro) / len(f1_macro):.4f}"
 
 
 def x_run_average_labelled(num: int, language: str):
@@ -915,86 +934,131 @@ def x_run_average_pipeline(num: int, language: str):
 def demonstration():
     # zulu, xhosa, swati, ndebele
     # Make all the CRFs
-    print("Starting CRF Generation")
-    ndebele_surface = BaselineCRF("ndebele").to_use_surface_crf()
-    ndebele_labelled = BaselineCRF("ndebele").to_use_labelled_crf()
-    print("isiNdebele Done")
-    swati_surface = BaselineCRF("swati").to_use_surface_crf()
-    swati_labelled = BaselineCRF("swati").to_use_labelled_crf()
-    print("siSwati Done")
-    xhosa_surface = BaselineCRF("xhosa").to_use_surface_crf()
-    xhosa_labelled = BaselineCRF("xhosa").to_use_labelled_crf()
-    print("isiXhosa Done")
-    zulu_surface = BaselineCRF("zulu").to_use_surface_crf()
-    zulu_labelled = BaselineCRF("zulu").to_use_labelled_crf()
-    print("isiZulu Done")
 
-    print("Saving Models")
     ndebeleFile = "isiNdebeleSurfaceModel.sav"
     swatiFile = "siSwatiSurfaceModel.sav"
     xhosaFile = "isiXhosaSurfaceModel.sav"
     zuluFile = "isiZuluSurfaceModel.sav"
 
-    pickle.dump(ndebele_surface, open(ndebeleFile, 'wb'))
-    pickle.dump(swati_surface, open(swatiFile, 'wb'))
-    pickle.dump(xhosa_surface, open(xhosaFile, 'wb'))
-    pickle.dump(zulu_surface, open(zuluFile, 'wb'))
-    print("Models Saved")
+    # ndebele_surface = pickle.load(open(ndebeleFile, 'rb'))
+    # swati_surface = pickle.load(open(swatiFile, 'rb'))
+    # xhosa_surface = pickle.load(open(xhosaFile, 'rb'))
+    # zulu_surface = pickle.load(open(zuluFile, 'rb'))
+
+    # print("Starting CRF Generation")
+    # ndebele_surface = BaselineCRF("ndebele").to_use_surface_crf()
+    # # ndebele_labelled = BaselineCRF("ndebele").to_use_labelled_crf()
+    # pickle.dump(ndebele_surface, open(ndebeleFile, 'wb'))
+    # print("isiNdebele Done")
+    # swati_surface = BaselineCRF("swati").to_use_surface_crf()
+    # pickle.dump(swati_surface, open(swatiFile, 'wb'))
+    # # swati_labelled = BaselineCRF("swati").to_use_labelled_crf()
+    # print("siSwati Done")
+    # xhosa_surface = BaselineCRF("xhosa").to_use_surface_crf()
+    # pickle.dump(xhosa_surface, open(xhosaFile, 'wb'))
+    # # xhosa_labelled = BaselineCRF("xhosa").to_use_labelled_crf()
+    # print("isiXhosa Done")
+    # zulu_surface = BaselineCRF("zulu").to_use_surface_crf()
+    # pickle.dump(zulu_surface, open(zuluFile, 'wb'))
+    # # zulu_labelled = BaselineCRF("zulu").to_use_labelled_crf()
+    # print("isiZulu Done")
+
+    print("Zulu F1", x_run_average_surface(5, "zulu"))
+    print("Xhosa F1", x_run_average_surface(5, "xhosa"))
+    print("Swati F1", x_run_average_surface(5, "swati"))
+    print("Ndebele F1", x_run_average_surface(5, "ndebele"))
+
 
     print("CRF Generation Completed")
-    #########################################################
-    word = ""
-    languages = ["ndebele", "swati", "xhosa", "zulu"]
-    while True:
-        word = input("Enter a word: ").rstrip(" ").rstrip("\n")
-        if word == "quit":
-            exit(0)
 
-        language = input("Enter a language: ").rstrip(" ").rstrip("\n")
+    # for lang in ["ndebele", "swati", "xhosa", "zulu"]:
+    #     with open(os.path.join(sys.path[0], f"../morphology/{lang}/{lang}.clean.test.conll"), 'r') as f:
+    #         words = [line.split(" | ")[0] for line in f.read().splitlines(keepends=False)]
+    #         out_words = []
+    #         for word in words:
+    #             features = surface_segment_data_active_preparation([word])
+    #             if lang == "ndebele":
+    #                 ans = ndebele_surface.predict(features)
+    #             elif lang == "swati":
+    #                 ans = swati_surface.predict(features)
+    #             elif lang == "xhosa":
+    #                 ans = xhosa_surface.predict(features)
+    #             elif lang == "zulu":
+    #                 ans = zulu_surface.predict(features)
+    #
+    #             labels = ans[0]
+    #
+    #             tmp = []
+    #             for word, label in zip(word, labels):
+    #                 for i in range(len(label)):
+    #                     if label[i] == "S" or label[i] == "E":
+    #                         tmp.append(word[i])
+    #                         tmp.append("_")
+    #                     else:
+    #                         tmp.append(word[i])
+    #             tmp = "".join(tmp).rstrip("_")
+    #             out_words.append(tmp)
+    #
+    #     with open(os.path.join(sys.path[0], f"../morphology/{lang}/{lang}.test.surface.predictions.conll"), "w") as f:
+    #         f.write("Token | PredictedSurfaceSegmentation\n")
+    #
+    #         for (in_word, out_word) in zip(words, out_words):
+    #             f.write(f"{in_word} | {out_word}\n")
 
-        while language not in languages:
-            print("Invalid Language Entered")
-            language = input("Enter a language: ").rstrip(" ").rstrip("\n")
-
-        ans = []
-        features = surface_segment_data_active_preparation([word])
-        if language == "ndebele":
-            ans = ndebele_surface.predict(features)
-        elif language == "swati":
-            ans = swati_surface.predict(features)
-        elif language == "xhosa":
-            ans = xhosa_surface.predict(features)
-        elif language == "zulu":
-            ans = zulu_surface.predict(features)
-
-        labels = ans[0]
-        word_list = list(word)
-
-        tmp = []
-        print(labels)
-        print(word_list)
-        for word, label in zip(word_list, labels):
-            for i in range(len(label)):
-                if label[i] == "S" or label[i] == "E":
-                    tmp.append(word[i])
-                    tmp.append("-")
-                else:
-                    tmp.append(word[i])
-        tmp = "".join(tmp).rstrip("-")
-
-        print("Segmented Word: "+tmp)
-        features = surface_labelled_data_preparation_pipeline([tmp])
-        if language == "ndebele":
-            ans = ndebele_labelled.predict(features)
-        elif language == "swati":
-            ans = swati_labelled.predict(features)
-        elif language == "xhosa":
-            ans = xhosa_labelled.predict(features)
-        elif language == "zulu":
-            ans = zulu_labelled.predict(features)
-
-        labels = ans[0]
-        print("Segment Labels: "+str(labels))
+    #
+    # #########################################################
+    # word = ""
+    # languages = ["ndebele", "swati", "xhosa", "zulu"]
+    # while True:
+    #     word = input("Enter a word: ").rstrip(" ").rstrip("\n")
+    #     if word == "quit":
+    #         exit(0)
+    #
+    #     language = input("Enter a language: ").rstrip(" ").rstrip("\n")
+    #
+    #     while language not in languages:
+    #         print("Invalid Language Entered")
+    #         language = input("Enter a language: ").rstrip(" ").rstrip("\n")
+    #
+    #     ans = []
+    #     features = surface_segment_data_active_preparation([word])
+    #     if language == "ndebele":
+    #         ans = ndebele_surface.predict(features)
+    #     elif language == "swati":
+    #         ans = swati_surface.predict(features)
+    #     elif language == "xhosa":
+    #         ans = xhosa_surface.predict(features)
+    #     elif language == "zulu":
+    #         ans = zulu_surface.predict(features)
+    #
+    #     labels = ans[0]
+    #     word_list = list(word)
+    #
+    #     tmp = []
+    #     print(labels)
+    #     print(word_list)
+    #     for word, label in zip(word_list, labels):
+    #         for i in range(len(label)):
+    #             if label[i] == "S" or label[i] == "E":
+    #                 tmp.append(word[i])
+    #                 tmp.append("-")
+    #             else:
+    #                 tmp.append(word[i])
+    #     tmp = "".join(tmp).rstrip("-")
+    #
+    #     print("Segmented Word: "+tmp)
+    #     # features = surface_labelled_data_preparation_pipeline([tmp])
+    #     # if language == "ndebele":
+    #     #     ans = ndebele_labelled.predict(features)
+    #     # elif language == "swati":
+    #     #     ans = swati_labelled.predict(features)
+    #     # elif language == "xhosa":
+    #     #     ans = xhosa_labelled.predict(features)
+    #     # elif language == "zulu":
+    #     #     ans = zulu_labelled.predict(features)
+    #     #
+    #     # labels = ans[0]
+    #     # print("Segment Labels: "+str(labels))
 
 demonstration()
 

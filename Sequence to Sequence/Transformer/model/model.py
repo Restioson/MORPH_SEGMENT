@@ -6,11 +6,12 @@ import torch.optim as optim
 import torchtext
 from torchtext.datasets import Multi30k
 from torchtext.data import Field, BucketIterator
+from aligned_f1 import align_seqs
+
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
-
-import spacy
+import sys
 import numpy as np
 
 import random
@@ -19,6 +20,10 @@ import time
 import data
 import evaluate
 SEED = 1234
+
+sys.path.append("/home/restioson/PycharmProjects/MORPH_PARSE/from_scratch")
+
+from demo import load_model, eval_segmented
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -357,7 +362,7 @@ class Seq2Seq(nn.Module):
 
 
 d = data.data()
-train_iterator, valid_iterator, test_iterator, test_data, train_data, SRC, TRG = d.getIterators()
+train_iterator, valid_iterator, test_iterator, test_data, train_data, valid_data, SRC, TRG = d.getIterators()
 
 
 '''
@@ -405,7 +410,7 @@ def count_parameters(model):
 '''
     Function to compare model size with hyper-parameter changes
 '''
-print(f'The model has {count_parameters(model):,} trainable parameters')
+# print(f'The model has {count_parameters(model):,} trainable parameters')
 
 def initialize_weights(m):
     if hasattr(m, 'weight') and m.weight.dim() > 1:
@@ -434,7 +439,6 @@ def train(model, iterator, optimizer, criterion, clip):
     epoch_loss = 0
     
     for i, batch in enumerate(iterator):
-        print(i, "/",len(iterator))
         src = batch.src
         trg = batch.trg
         
@@ -468,50 +472,156 @@ def epoch_time(start_time, end_time):
     elapsed_secs = int(elapsed_time - (elapsed_mins * 60))
     return elapsed_mins, elapsed_secs
 
-N_EPOCHS = 1
+N_EPOCHS = 150
 CLIP = 1
 
 best_valid_loss = float('inf')
 
-
-'''
-    Training loop for N_Epochs
-'''
-for epoch in range(N_EPOCHS):
-    
-    start_time = time.time()
-    e = evaluate.evaluate(model)
-    train_loss = train(model, train_iterator, optimizer, criterion, CLIP)
-    valid_loss = e.evaluateModel(model, valid_iterator, criterion)
-    print("Valid Loss")
-    end_time = time.time()
-    
-    epoch_mins, epoch_secs = epoch_time(start_time, end_time)
-    
-    if valid_loss < best_valid_loss:
-        best_valid_loss = valid_loss
-        torch.save(model.state_dict(), 'segment.pt')
-    
-    print(f'Epoch: {epoch+1:02} | Time: {epoch_mins}m {epoch_secs}s')
-    print(f'\tTrain Loss: {train_loss:.3f} | Train PPL: {math.exp(train_loss):7.3f}')
-    print(f'\t Val. Loss: {valid_loss:.3f} |  Val. PPL: {math.exp(valid_loss):7.3f}')
-
-
-
+# # '''
+# #     Training loop for N_Epochs
+# # '''
+# for epoch in range(N_EPOCHS):
+#     start_time = time.time()
+#     e = evaluate.evaluate(model)
+#     train_loss = train(model, train_iterator, optimizer, criterion, CLIP)
+#     valid_loss = e.evaluateModel(model, valid_iterator, criterion)
+#     print("Valid Loss")
+#     end_time = time.time()
+#     epoch_mins, epoch_secs = epoch_time(start_time, end_time)
+#
+#     if valid_loss < best_valid_loss:
+#         best_valid_loss = valid_loss
+#         torch.save(model.state_dict(), 'segment.pt')
+#
+#     print(f'Epoch: {epoch+1:02} | Time: {epoch_mins}m {epoch_secs}s')
+#     print(f'\tTrain Loss: {train_loss:.3f} | Train PPL: {math.exp(train_loss):7.3f}')
+#     print(f'\t Val. Loss: {valid_loss:.3f} |  Val. PPL: {math.exp(valid_loss):7.3f}')
+#
+#     # if epoch % 100 == 0 and epoch > 0:
+#     #     micro, macro = e.f1_scores(valid_data, SRC, TRG, model, device)
+#     #     print(f'Micro F1: {micro:.6f}. Macro F1: {macro:.6f}')
 
 
 '''
     Load best saved model for evaluation
 '''
-model.load_state_dict(torch.load('segment.pt'))
+model.load_state_dict(torch.load('segment_zu.pt', map_location=torch.device('cpu'), weights_only=True))
 e = evaluate.evaluate(model)
 test_loss = e.evaluateModel(model, test_iterator, criterion)
+# e.repl(SRC, TRG, model, device)
 
-print(f'| Test Loss: {test_loss:.3f} | Test PPL: {math.exp(test_loss):7.3f} |')
+# print(f'| Test Loss: {test_loss:.3f} | Test PPL: {math.exp(test_loss):7.3f} |')
+# print(e.f1_scores(test_data, SRC, TRG, model, device))
 
+tagger = load_model("/home/restioson/PycharmProjects/MORPH_PARSE/out_models/bilstm_word_morpheme_canon/bilstm-word-morpheme-ZU.pt")
+
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+    GREY = '\033[90m'
+
+# Imbalwa kakhulu imibutho esebenzayo
+# Intliziyo yoMgaqo-siseko nguMthetho Oyilwayo waMalungelo
+# Yintoni oyenzayo ekwenza kubenzima ukuthetha
+
+# correct_and_raw = [
+#     (
+#         # i-mbalwa ka-khulu i-mi-butho e-sebenz-a-yo
+#         # i-n-tliziyo ya-u-m-gaqo-si-seko ng-u-m-thetho o-yil-w-a-yo wa-a-ma-lungelo
+#         # yi-n-to-ni o-yi-enz-a-yo e-u-ku-enz-a ku-be-nzima u-ku-theth-a
+#
+#         "Imbalwa kakhulu imibutho esebenzayo",
+#         [
+#             "i[CopPre]-mbalwa[RelStem]",
+#             "ka[AdvPre]-khulu[AdjStem]",
+#             "i[NPrePre4]-mi[BPre4]-butho[NStem]",
+#             "e[RelConc4]-sebenz[VRoot]-a[VerbTerm]-yo[RelSuf]",
+#         ],
+#     ),
+#     (
+#         "Intliziyo yoMgaqo-siseko nguMthetho Oyilwayo waMalungelo",
+#             [
+#             "i[NPrePre9]-n[BPre9]-tliziyo[NStem]",
+#             "ya[PossConc9]-u[NPrePre3]-m[BPre3]-gaqo[NStem]-si[BPre7]-seko[NStem]",
+#             "ng[CopPre]-u[NPrePre3]-m[BPre3]-thetho[NStem]",
+#             "o[RelConc3]-yil[VRoot]-w[PassExt]-a[VerbTerm]-yo[RelSuf]",
+#             "wa[PossConc3]-a[NPrePre6]-ma[BPre6]-lungelo[NStem]",
+#         ],
+#     ),
+#     (
+#         "Yintoni oyenzayo ekwenza kubenzima ukuthetha",
+#         [
+#         "yi[CopPre]-n[BPre9]-to[NStem]-ni[InterrogSuf]",
+#         "o[RelConc1]-yi[OC9]-enz[VRoot]-a[VerbTerm]-yo[RelSuf]",
+#         "e[LocPre]-u[NPrePre15]-ku[BPre15]-enz[VRoot]-a[VerbTerm]",
+#         "ku[CopPre]-be[CopPre]-nzima[RelStem]",
+#         "u[NPrePre15]-ku[BPre15]-theth[VRoot]-a[VerbTerm]",
+#     ])
+# ]
+#
+# preds = [
+#     [
+#         "i[SC9]-mbalwa[RelStem]",
+#         "ka[AdvPre]-khulu[AdjStem]",
+#         "i[NPrePre4]-mi[BPre4]-butho[NStem]",
+#         "e[RelConc9]-sebenz[VRoot]-a[VerbTerm]-yo[RelSuf]",
+#         ".[Punc]"
+#     ],
+#     [
+#         "i[NPrePre9]-n[BPre9]-tliziyo[NStem]",
+#         "ya[PossConc9]-u[NPrePre3]-m[BPre3]-gaqo[NStem]-si[BPre7]-seko[NStem]",
+#         "ng[CopPre]-u[NPrePre3]-m[BPre3]-thetho[NStem]",
+#         "o[RelConc3]-yil[VRoot]-w[PassExt]-a[VerbTerm]-yo[RelSuf]",
+#         "wa[PossConc3]-a[NPrePre6]-ma[BPre6]-lungelo[NStem]",
+#         ".[PUNC]",
+#     ],
+#     [
+#         "yi[CopPre]-n[BPre9]-to[NStem]-ni[InterrogSuf]",
+#         "o[RelConc1]-yi[OC9]-enz[VRoot]-a[VerbTerm]-yo[RelSuf]",
+#         "e[RelConc9]-u[NPrePre15]-ku[BPre15]-enz[VRoot]-a[VerbTerm]",
+#         "ku[CopPre]-be[CopPre]-nzima[RelStem]",
+#         "u[NPrePre15]-ku[BPre15]-theth[VRoot]-a[VerbTerm]",
+#         "?[Punc]"
+#     ]
+# ]
+
+while True:
+
+# for (raw, correct), pred in zip(correct_and_raw, preds):
+    raw = input("> ")
+    # time.sleep(0.2)
+
+    # for letter in raw:
+    #     print(letter, end="", flush=True)
+    #     time.sleep((60.0 / 397.0) / 4 * abs(random.normalvariate(mu=1.0, sigma=0.2)))
+    # time.sleep(0.1)
+
+    segmented = e.segment_one(SRC, TRG, model, device, raw)
+    pred = eval_segmented(tagger, segmented)
+
+    # for pred_word, correct_word in zip(pred, correct):
+    # for word in pred:
+        # print(bcolors.ENDC, "Truth:   ", bcolors.GREY, f"{correct_word}")
+    # print(bcolors.ENDC, "Predicted: ", end="")
+    # print(segmented)
+    print(pred)
+    # pred_word = pred_word.split("-")
+    # correct_word = correct_word.split("-")
+    # pred_word, correct_word = align_seqs(pred_word, correct_word, pad="[padded]")
+    # for i, (morph_pred, morph_correct) in enumerate(zip(pred_word, correct_word)):
+    #     color = bcolors.OKGREEN if morph_pred == morph_correct else bcolors.FAIL
+    #     start_hypen = bcolors.GREY + "-" if i > 0 else ""
+    #     print(f"{start_hypen}{color}{morph_pred}", end="")
+    # print(bcolors.ENDC, "\n")
 
 '''
     Function to evaluate words in the test set
 '''
-e.evaluateWords(50, test_data, SRC, TRG, model, device)
-
+# e.evaluateWords(-1, test_data, SRC, TRG, model, device, save=True, printWords=False)

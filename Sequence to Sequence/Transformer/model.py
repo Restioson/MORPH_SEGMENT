@@ -434,7 +434,7 @@ model = Seq2Seq(enc, dec, SRC_PAD_IDX, TRG_PAD_IDX, device).to(device)
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-print(f'The model has {count_parameters(model):,} trainable parameters')
+# print(f'The model has {count_parameters(model):,} trainable parameters')
 
 def initialize_weights(m):
     if hasattr(m, 'weight') and m.weight.dim() > 1:

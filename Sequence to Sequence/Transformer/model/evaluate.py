@@ -3,13 +3,14 @@ import torch.nn as nn
 import torch.optim as optim
 
 import torchtext
+from sklearn.metrics import f1_score
 from torchtext.datasets import Multi30k
 from torchtext.data import Field, BucketIterator
+from aligned_f1 import align_seqs
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 
-import spacy
 import numpy as np
 
 import random
@@ -59,14 +60,9 @@ class evaluate:
         
         model.eval()
             
-        if isinstance(sentence, str):
-            nlp = spacy.load('de')
-            tokens = [token.text.lower() for token in nlp(sentence)]
-        else:
-            tokens = [token.lower() for token in sentence]
-
+        tokens = [token.lower() for token in sentence]
         tokens = [src_field.init_token] + tokens + [src_field.eos_token]
-            
+
         src_indexes = [src_field.vocab.stoi[token] for token in tokens]
 
         src_tensor = torch.LongTensor(src_indexes).unsqueeze(0).to(device)
@@ -138,12 +134,15 @@ class evaluate:
         Function to evaluate words in the test set
     '''
     def evaluateWords(self, n, test_data, SRC, TRG, model, device, printWords=True, save=False):
+        if n == -1:
+            n = len(test_data.examples)
+
         file = open('results.txt', 'w')
         for i in range(n):
             #example_idx = random.randint(0, len(test_iterator))
             src = vars(test_data.examples[i])['src']
             trg = vars(test_data.examples[i])['trg']
-            
+
             translation, attention = self.translate_sentence(src, SRC, TRG, model, device)
             if printWords==True:
                 print("Target:\t", self.arrToWord(trg))
@@ -153,3 +152,38 @@ class evaluate:
                 file.write(self.arrToWord(trg)+'\t'+self.arrToWord(translation).replace("<eos>", "")+'\n')
         file.close()
 
+    def repl(self, SRC, TRG, model, device):
+        while True:
+            src = input("> ")
+            for word in src.split(" "):
+                translation, attention = self.translate_sentence(word, SRC, TRG, model, device)
+                print(self.arrToWord(translation).replace("<eos>", ""))
+
+    def segment_one(self, SRC, TRG, model, device, text):
+        results = []
+        for word in text.split(" "):
+            translation, attention = self.translate_sentence(word, SRC, TRG, model, device)
+            results.append(self.arrToWord(translation).replace("<eos>", "").split("-"))
+        return results
+
+
+    def f1_scores(self, valid, SRC, TRG, model, device):
+        model.eval()
+        with torch.no_grad():
+            all_targets, all_preds = [], []
+            for ex in valid.examples:
+                src = ex.src
+                trg = ex.trg
+
+                translation, _ = self.translate_sentence(src, SRC, TRG, model, device)
+                target = self.arrToWord(trg).split("-")
+                prediction = self.arrToWord(translation).replace("<eos>", "").split("-")
+
+                prediction, target = align_seqs(prediction, target)
+
+                all_targets.extend(target)
+                all_preds.extend(prediction)
+            print("done examples")
+            micro = f1_score(all_targets, all_preds, zero_division=0.0, average='micro')
+            macro = f1_score(all_targets, all_preds, zero_division=0.0, average='macro')
+        return micro, macro
