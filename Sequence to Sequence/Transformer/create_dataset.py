@@ -1,6 +1,8 @@
 import json
 import random
 
+random.seed(1)
+
 for (lang_name, lang_id) in (("xhosa", "XH"), ("zulu", "ZU"), ("ndebele", "NR"), ("swati", "SS")):
     for dset in ("train", "test"):
         with open(f"../Data/{lang_id}_{dset.upper()}.tsv") as in_file:
@@ -9,16 +11,16 @@ for (lang_name, lang_id) in (("xhosa", "XH"), ("zulu", "ZU"), ("ndebele", "NR"),
             if dset == "test":
                 with open(f"../Data/{lang_name}/json/{lang_name}-{dset}.json", "w") as out_file:
                     for line in lines:
-                        raw, _, segmented, _ = line.split("\t")
+                        raw, _, segmented, tags = line.split("\t")
                         segmented = segmented.split("_")
-                        out_file.write(json.dumps({"src": raw, "trg": '-'.join(segmented)}) + '\n')
+                        out_file.write(json.dumps({"src": raw, "trg": '-'.join(segmented), "tags": tags}) + '\n')
             else:
                 with open(f"../Data/{lang_name}/json/{lang_name}-valid.json", "w") as valid_file:
                     with open(f"../Data/{lang_name}/json/{lang_name}-train.json", "w") as train_file:
                         random.shuffle(lines)
                         for i, line in enumerate(lines):
-                            raw, _, segmented, _ = line.split("\t")
+                            raw, _, segmented, tags = line.split("\t")
                             segmented = segmented.split("_")
 
                             out_file = valid_file if i < len(lines) // 10 else train_file
-                            out_file.write(json.dumps({"src": raw, "trg": '-'.join(segmented)}) + '\n')
+                            out_file.write(json.dumps({"src": raw, "trg": '-'.join(segmented), "tags": tags}) + '\n')
