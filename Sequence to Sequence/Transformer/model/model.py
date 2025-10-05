@@ -3,7 +3,6 @@ import re
 import sys
 
 import math
-import pprint
 import random
 import time
 
@@ -12,7 +11,7 @@ import torch.nn as nn
 import numpy as np
 import tqdm
 
-import data
+import dataset
 import evaluation
 
 # Disable inspections since the import comes from the below path and PyCharm does not understand this
@@ -121,7 +120,7 @@ class MultiHeadAttentionLayer(nn.Module):
 
         self.scale = torch.sqrt(torch.FloatTensor([self.head_dim])).to(device)
 
-    def forward(self, query, key, value, mask=None):
+    def forward(self, query, key, value, mask: torch.Tensor = None):
         batch_size = query.shape[0]
 
         q = self.fc_q(query)
@@ -273,11 +272,11 @@ class Seq2Seq(nn.Module):
         self.trg_pad_idx = trg_pad_idx
         self.device = device
 
-    def make_src_mask(self, src):
+    def make_src_mask(self, src: torch.Tensor):
         src_mask = (src != self.src_pad_idx).unsqueeze(1).unsqueeze(2)
         return src_mask
 
-    def make_trg_mask(self, trg):
+    def make_trg_mask(self, trg: torch.Tensor):
         trg_pad_mask = (trg != self.trg_pad_idx).unsqueeze(1).unsqueeze(2)
         trg_len = trg.shape[1]
         trg_sub_mask = torch.tril(torch.ones((trg_len, trg_len), device=self.device)).bool()
@@ -378,58 +377,131 @@ def train(model, src_field, target_field, train_iter, valid_iter, valid_data, de
     print(f'Micro F1: {micro:.6f}. Macro F1: {macro:.6f}')
 
 
+class TransformerSegmenterBeamSearch:
+    def __init__(
+            self,
+            data: dataset.Data,
+            max_len=50,
+            best_k=5,
+            min_prob_to_keep=0,
+            device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
+    ):
+        self.best_k = best_k
+        self.min_prob_to_keep = min_prob_to_keep
+        self.max_len = max_len
+        self.device = device
+        self.src_field, self.trg_field = data.src_field, data.target_field
+
+        input_dim = len(self.src_field.vocab)
+        output_dim = len(self.trg_field.vocab)
+        hidden_dim = 256
+        encoder_layers = 3
+        decoder_layers = 3
+        encoder_heads = 8
+        decoder_heads = 8
+        encoder_pf_dim = 512
+        decoder_pf_head = 512
+        encoder_dropout = 0.1
+        decoder_dropout = 0.1
+
+        enc = Encoder(input_dim,
+                      hidden_dim,
+                      encoder_layers,
+                      encoder_heads,
+                      encoder_pf_dim,
+                      encoder_dropout,
+                      device)
+
+        dec = Decoder(output_dim,
+                      hidden_dim,
+                      decoder_layers,
+                      decoder_heads,
+                      decoder_pf_head,
+                      decoder_dropout,
+                      device)
+
+        src_pad_idx = self.src_field.vocab.stoi[self.src_field.pad_token]
+        trg_pad_idx = self.trg_field.vocab.stoi[self.trg_field.pad_token]
+
+        self.model = Seq2Seq(enc, dec, src_pad_idx, trg_pad_idx, device).to(device)
+
+    def segment_word(self, word):
+        src_tokens = [char.lower() for char in word]
+        src_tokens = [self.src_field.init_token] + src_tokens + [self.src_field.eos_token]
+
+        src_indexes = [self.src_field.vocab.stoi[token] for token in src_tokens]
+        src_tensor = torch.LongTensor(src_indexes).unsqueeze(0).to(self.device)
+        src_mask = self.model.make_src_mask(src_tensor)
+
+        with torch.no_grad():
+            src_encoded = self.model.encoder(src_tensor, src_mask)
+
+        start_target_tokens = [self.trg_field.vocab.stoi[self.trg_field.init_token]]
+
+        final_segmentations = []
+        in_progress_branches = [(0.0, start_target_tokens)]
+        while len(in_progress_branches) != 0:
+            # Predict the next token for each branch under consideration
+            new_branches = []
+            for (prob, branch) in in_progress_branches:
+                new_branch = self._beam_search_inner(prob, branch, src_encoded, src_mask)
+                new_branches.extend(new_branch)
+
+            # Take top `best_k` branches and use those as either the final segmentations or new in-progress branches
+            all_branches = new_branches + final_segmentations
+            all_branches = sorted(
+                all_branches,
+                reverse=True,
+                key=lambda prob_and_branch: prob_and_branch[0] / len(prob_and_branch[1])
+            )
+
+            in_progress_branches = []
+            final_segmentations = []
+            for (prob, branch) in all_branches[:self.best_k]:
+                if len(branch) == self.max_len or branch[-1] == self.trg_field.vocab.stoi[self.trg_field.eos_token]:
+                    final_segmentations.append((prob, branch))
+                else:
+                    in_progress_branches.append((prob, branch))
+
+        trg_tokens = sorted(
+            ((prob, self._convert_indices_to_morphemes(target_indices))
+             for (prob, target_indices) in final_segmentations),
+            key=lambda pair: pair[0]
+        )
+        return list(trg_tokens)
+
+    def _beam_search_inner(self, prev_prob, prev_target_tokens, src_encoded, src_mask):
+        target_tensor = torch.LongTensor(prev_target_tokens).unsqueeze(0).to(self.device)
+        target_mask = self.model.make_trg_mask(target_tensor)
+
+        with torch.no_grad():
+            output, attention = self.model.decoder(target_tensor, src_encoded, target_mask, src_mask)
+
+        probabilities = torch.nn.functional.softmax(output, dim=2)[:, -1].flatten()
+        top_k = torch.topk(probabilities, k=self.best_k)
+
+        possibilities = []
+        for i in range(self.best_k):
+            token, prob = top_k.indices[i].item(), top_k.values[i].item()
+            if prob < self.min_prob_to_keep:
+                continue
+
+            possibilities.append((prev_prob + prob, prev_target_tokens + [token]))
+
+        return possibilities
+
+    def _convert_indices_to_morphemes(self, target_indices):
+        joined = "".join([self.trg_field.vocab.itos[i] for i in target_indices[1:]])
+        joined = joined.replace("<eos>", "").split("-")
+        return joined
+
+    def load_state_dict(self, path):
+        self.model.load_state_dict(torch.load(path, map_location=self.device, weights_only=True))
+
+
 def beam_search():
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    seed = 1
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
-
-    d = data.Data()
-    train_data, train_iter, valid_data, valid_iter, test_data, test_iter, src_field, target_field = d.get_iterators()
-
-    # Specify the input, hidden, ouput dimensions. Encoder, Decoder heads and dropout
-    input_dim = len(src_field.vocab)
-    output_dim = len(target_field.vocab)
-    hidden_dim = 256
-    encoder_layers = 3
-    decoder_layers = 3
-    encoder_heads = 8
-    decoder_heads = 8
-    encoder_pf_dim = 512
-    decoder_pf_head = 512
-    encoder_dropout = 0.1
-    decoder_dropout = 0.1
-
-    enc = Encoder(input_dim,
-                  hidden_dim,
-                  encoder_layers,
-                  encoder_heads,
-                  encoder_pf_dim,
-                  encoder_dropout,
-                  device)
-
-    dec = Decoder(output_dim,
-                  hidden_dim,
-                  decoder_layers,
-                  decoder_heads,
-                  decoder_pf_head,
-                  decoder_dropout,
-                  device)
-
-    SRC_PAD_IDX = src_field.vocab.stoi[src_field.pad_token]
-    TRG_PAD_IDX = target_field.vocab.stoi[target_field.pad_token]
-
-    # Initialise model
-    model = Seq2Seq(enc, dec, SRC_PAD_IDX, TRG_PAD_IDX, device).to(device)
-
-    # Train model
-    # train(model, src_field, target_field, train_iter, valid_iter, valid_data, device)
-
-    # # Load best saved model for evaluation
+    data = dataset.Data()
+    model = TransformerSegmenterBeamSearch(data)
     model.load_state_dict(
         torch.load(
             'segment_new_zu_no_validset.pt',
@@ -459,8 +531,7 @@ def beam_search():
             true_morphemes = "".join(example.trg).lower().split("-")
             true_tags = example.tags.split("_")
 
-            pred_morphemes = evaluation.beam_search_word(word, src_field, target_field, model, device, max_len, best_k,
-                                                         min_prob_to_keep)
+            pred_morphemes = model.segment_word(word)
             pred_analyses = []
             pred_tags = []
             for possibility in pred_morphemes:
@@ -515,7 +586,7 @@ def segment_and_tag_unseen():
     torch.cuda.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
 
-    d = data.Data()
+    d = dataset.Data()
     train_data, train_iter, valid_data, valid_iter, test_data, test_iter, src_field, target_field = d.get_iterators()
 
     # Specify the input, hidden, ouput dimensions. Encoder, Decoder heads and dropout
@@ -609,7 +680,7 @@ def find_class_5_or_11():
                 if any("11" in word[4] or re.search(r"[a-zA-Z]5(-|$)", word[4]) for word in line):
                     writer.writerow([
                         " ".join(word[0] for word in line),  # Raw words
-                        line[0][1],                          # Line no
+                        line[0][1],  # Line no
                         " ".join(word[2] for word in line),  # Analysis
                         " ".join(word[3] for word in line),  # Morphemes
                         " ".join(word[4] for word in line),  # Tags
