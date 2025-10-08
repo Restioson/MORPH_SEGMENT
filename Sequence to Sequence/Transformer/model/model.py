@@ -15,9 +15,9 @@ import dataset
 import evaluation
 
 # Disable inspections since the import comes from the below path and PyCharm does not understand this
-sys.path.append("/home/restioson/PycharmProjects/MORPH_PARSE/from_scratch")
+sys.path.append("/home/restioson/PycharmProjects/MORPH_PARSE/")
 # noinspection PyUnresolvedReferences,PyPackageRequirements
-from demo import load_model, predict_tags_for_word  # noqa: E402
+from from_scratch.demo import load_model, predict_tags_for_words_batched, predict_tags_for_word  # noqa: E402
 
 MAX_LENGTH = 1000
 
@@ -502,21 +502,13 @@ class TransformerSegmenterBeamSearch:
 def beam_search():
     data = dataset.Data()
     model = TransformerSegmenterBeamSearch(data)
-    model.load_state_dict(
-        torch.load(
-            'segment_new_zu_no_validset.pt',
-            map_location=torch.device('cpu'),
-            weights_only=True
-        )
-    )
+    model.load_state_dict('segment_new_zu_no_validset.pt')
 
     tagger = load_model(
         "/home/restioson/PycharmProjects/MORPH_PARSE/bilstm-no-testset-words-morpheme-ZU.pt"
     )
 
     for best_k in [1, 2, 3, 4, 5]:
-        min_prob_to_keep = 0.00
-        max_len = 50
 
         print(f"\n\nk = {best_k}")
 
@@ -526,7 +518,7 @@ def beam_search():
         gold_tag_hr = 0
         total_segs = []
         incorrect = dict()
-        for i, example in enumerate(valid_data):
+        for i, example in tqdm.tqdm(enumerate(data.valid_data), total=len(data.valid_data)):
             word = "".join(example.src)
             true_morphemes = "".join(example.trg).lower().split("-")
             true_tags = example.tags.split("_")
@@ -534,12 +526,18 @@ def beam_search():
             pred_morphemes = model.segment_word(word)
             pred_analyses = []
             pred_tags = []
-            for possibility in pred_morphemes:
-                tags = predict_tags_for_word(tagger, possibility)
+
+            batched_tags = predict_tags_for_words_batched(
+                tagger,
+                [seg for _score, seg in pred_morphemes] + [true_morphemes]
+            )
+
+            for (_score, possibility), tags in zip(pred_morphemes, batched_tags):
                 pred_analyses.append((possibility, tags))
                 pred_tags.append(tags)
 
-            if true_tags == predict_tags_for_word(tagger, true_morphemes):
+            tags_greedy = batched_tags[-1]
+            if true_tags == tags_greedy:
                 gold_tag_hr += 1
 
             if (true_morphemes, true_tags) in pred_analyses:
@@ -560,17 +558,17 @@ def beam_search():
         # print("All incorrect examples")
         # pprint.pprint(incorrect)
 
-        print(f"Gold tag hitrate = {gold_tag_hr / len(valid_data) * 100:.2f}")
-        print(f"{analysis_correct / len(valid_data) * 100:.2f}% analysis lattice coverage (seg + parse)")
+        print(f"Gold tag hitrate = {gold_tag_hr / len(data.valid_data) * 100:.2f}")
+        print(f"{analysis_correct / len(data.valid_data) * 100:.2f}% analysis lattice coverage (seg + parse)")
         incorrect_with_punc = [i for i in incorrect.values() if not i["word"].isalpha()]
         print(f"{len(incorrect_with_punc)} incorrect examples with numbers or punctuation out of"
               f" {len(incorrect)} errors total")
         print(f"If these errors were fixed, then analysis lattice coverage would be "
-              f"{(analysis_correct + len(incorrect_with_punc)) / len(valid_data) * 100:.2f}")
+              f"{(analysis_correct + len(incorrect_with_punc)) / len(data.valid_data) * 100:.2f}")
         print(
-            f"{(seg_correct + analysis_correct) / len(valid_data) * 100:.2f}% segmentation lattice coverage (seg only)"
+            f"{(seg_correct + analysis_correct) / len(data.valid_data) * 100:.2f}% segmentation lattice coverage (seg only)"
         )
-        print(f"{(tags_correct + analysis_correct) / len(valid_data) * 100:.2f}% tag lattice coverage (tag only)")
+        print(f"{(tags_correct + analysis_correct) / len(data.valid_data) * 100:.2f}% tag lattice coverage (tag only)")
 
         acc = 78.25  # Cached manually ;)
         print("Accuracy on the greedy best choice of segmentation", acc)
@@ -688,4 +686,4 @@ def find_class_5_or_11():
 
 
 if __name__ == "__main__":
-    find_class_5_or_11()
+    beam_search()
